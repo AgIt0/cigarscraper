@@ -65,17 +65,26 @@ func main() {
 		}
 
 		e.ForEach("table table tr", func(i int, el *colly.HTMLElement) {
+			var price float64
 			available := true
+
 			if el.DOM.Find("td:nth-child(5) > input").Length() == 0 {
 				available = false
 			}
 
 			priceWithCurrency := strings.Split(strings.TrimSpace(el.ChildText("td:nth-child(3)")), " ")
+			currency := priceWithCurrency[0]
 
-			price, _ := strconv.ParseFloat(priceWithCurrency[1], 64)
+			if currency == "" {
+				available = false
+				price = 0.0
+			} else {
+				price, _ = strconv.ParseFloat(strings.ReplaceAll(priceWithCurrency[1], ",", "."), 64)
+			}
+
 			availability := Availability{
 				available: available,
-				currency:  priceWithCurrency[0],
+				currency:  currency,
 				price:     price,
 			}
 
@@ -89,12 +98,10 @@ func main() {
 		cigars = append(cigars, cigar)
 	})
 
-	// Start scraping on http://coursera.com/browse
 	c.Visit("https://www.hacico.de/en/Cigars/Nicaragua")
 
 	enc := json.NewEncoder(file)
 	enc.SetIndent("", "  ")
 
-	// Dump json to the standard output
 	enc.Encode(cigars)
 }
