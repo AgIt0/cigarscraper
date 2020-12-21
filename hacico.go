@@ -1,7 +1,7 @@
 package main
 
 import (
-	"encoding/json"
+	"encoding/csv"
 	"log"
 	"os"
 	"strconv"
@@ -23,15 +23,50 @@ type Cigar struct {
 	box    Availability
 }
 
-func main() {
-	fName := "cigars.json"
-	file, err := os.Create(fName)
-	if err != nil {
-		log.Fatalf("Cannot create file %q: %s\n", fName, err)
-		return
-	}
-	defer file.Close()
+func getCigarAvailability(el *colly.HTMLElement) Availability {
+	var price float64
+	available := true
 
+	if el.DOM.Find("td:nth-child(5) > input").Length() == 0 {
+		available = false
+	}
+
+	priceWithCurrency := strings.Split(strings.TrimSpace(el.ChildText("td:nth-child(3)")), " ")
+	currency := priceWithCurrency[0]
+
+	if currency == "" {
+		available = false
+		price = 0.0
+	} else {
+		price, _ = strconv.ParseFloat(strings.ReplaceAll(priceWithCurrency[1], ",", "."), 64)
+	}
+
+	return Availability{
+		available: available,
+		currency:  currency,
+		price:     price,
+	}
+}
+
+func saveToCSV(cigars []Cigar) {
+	// just delete/recreate if existing
+	os.Remove("cigars.csv")
+	file, err := os.Create("cigars.csv")
+	defer file.Close()
+	if err != nil {
+		log.Fatalln("failed to open file", err)
+	}
+
+	writer := csv.NewWriter(file)
+	defer writer.Flush()
+
+	writer.Write([]string{"origin", "name", "url", "single_price", "single_currency", "single_available", "box_price", "box_currency", "box_available"})
+	for _, cigar := range cigars {
+		writer.Write([]string{"Nicaragua", cigar.name, cigar.url, strconv.FormatFloat(cigar.single.price, 'g', -1, 64), cigar.single.currency, strconv.FormatBool(cigar.single.available), strconv.FormatFloat(cigar.box.price, 'g', -1, 64), cigar.box.currency, strconv.FormatBool(cigar.box.available)})
+	}
+}
+
+func main() {
 	c := colly.NewCollector(
 		colly.AllowedDomains("www.hacico.de"),
 		colly.CacheDir("./hacico_cache"),
@@ -65,28 +100,7 @@ func main() {
 		}
 
 		e.ForEach("table table tr", func(i int, el *colly.HTMLElement) {
-			var price float64
-			available := true
-
-			if el.DOM.Find("td:nth-child(5) > input").Length() == 0 {
-				available = false
-			}
-
-			priceWithCurrency := strings.Split(strings.TrimSpace(el.ChildText("td:nth-child(3)")), " ")
-			currency := priceWithCurrency[0]
-
-			if currency == "" {
-				available = false
-				price = 0.0
-			} else {
-				price, _ = strconv.ParseFloat(strings.ReplaceAll(priceWithCurrency[1], ",", "."), 64)
-			}
-
-			availability := Availability{
-				available: available,
-				currency:  currency,
-				price:     price,
-			}
+			availability := getCigarAvailability(el)
 
 			if i == 0 {
 				cigar.single = availability
@@ -95,13 +109,12 @@ func main() {
 			}
 		})
 
+		log.Println(cigar)
 		cigars = append(cigars, cigar)
 	})
 
+	// start scraping
 	c.Visit("https://www.hacico.de/en/Cigars/Nicaragua")
 
-	enc := json.NewEncoder(file)
-	enc.SetIndent("", "  ")
-
-	enc.Encode(cigars)
+	saveToCSV(cigars)
 }
