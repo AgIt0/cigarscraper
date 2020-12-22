@@ -71,9 +71,15 @@ func main() {
 	c := colly.NewCollector(
 		colly.AllowedDomains("www.hacico.de"),
 		colly.CacheDir("./hacico_cache"),
+		colly.Async(),
 	)
 
+	c.Limit(&colly.LimitRule{DomainGlob: "*", Parallelism: 4})
 	cigars := make([]Cigar, 0, 200)
+
+	c.OnHTML(`a.sub2`, func(e *colly.HTMLElement) {
+		c.Visit(e.Attr("href"))
+	})
 
 	c.OnHTML(`a.sub3`, func(e *colly.HTMLElement) {
 		// For some reason there are a few "hiddne" pages that just don't have a name in the link
@@ -82,7 +88,7 @@ func main() {
 		}
 		link := e.Attr("href")
 
-		e.Request.Visit(link)
+		c.Visit(link)
 	})
 
 	c.OnRequest(func(r *colly.Request) {
@@ -112,12 +118,12 @@ func main() {
 			}
 		})
 
-		log.Println(cigar)
 		cigars = append(cigars, cigar)
 	})
 
 	// start scraping
 	c.Visit("https://www.hacico.de/en/Cigars/Nicaragua")
+	c.Wait()
 
 	saveToCSV(cigars)
 }
