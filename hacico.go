@@ -17,6 +17,7 @@ type Availability struct {
 }
 
 type Cigar struct {
+	origin string
 	name   string
 	url    string
 	single Availability
@@ -62,7 +63,7 @@ func saveToCSV(cigars []Cigar) {
 
 	writer.Write([]string{"origin", "name", "url", "single_price", "single_currency", "single_available", "box_price", "box_currency", "box_available"})
 	for _, cigar := range cigars {
-		writer.Write([]string{"Nicaragua", cigar.name, cigar.url, strconv.FormatFloat(cigar.single.price, 'g', -1, 64), cigar.single.currency, strconv.FormatBool(cigar.single.available), strconv.FormatFloat(cigar.box.price, 'g', -1, 64), cigar.box.currency, strconv.FormatBool(cigar.box.available)})
+		writer.Write([]string{cigar.origin, cigar.name, cigar.url, strconv.FormatFloat(cigar.single.price, 'g', -1, 64), cigar.single.currency, strconv.FormatBool(cigar.single.available), strconv.FormatFloat(cigar.box.price, 'g', -1, 64), cigar.box.currency, strconv.FormatBool(cigar.box.available)})
 	}
 }
 
@@ -89,14 +90,16 @@ func main() {
 	})
 
 	c.OnHTML(`div.product_listing_box`, func(e *colly.HTMLElement) {
+		origin := e.DOM.Parent().Children().First().Find("a:nth-child(3)").Text()
 		name := e.ChildText("a.product_listing_box_name")
 		url := e.ChildAttr("a.product_listing_box_name", "href")
 
 		log.Println("Scraping ", name)
 
 		cigar := Cigar{
-			name: name,
-			url:  url,
+			origin: origin,
+			name:   name,
+			url:    url,
 		}
 
 		e.ForEach("table table tr", func(i int, el *colly.HTMLElement) {
