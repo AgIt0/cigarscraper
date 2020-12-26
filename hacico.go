@@ -17,6 +17,7 @@ type Availability struct {
 }
 
 type Cigar struct {
+	site   string
 	origin string
 	name   string
 	url    string
@@ -61,20 +62,20 @@ func saveToCSV(cigars []Cigar) {
 	writer := csv.NewWriter(file)
 	defer writer.Flush()
 
-	writer.Write([]string{"origin", "name", "url", "single_price", "single_currency", "single_available", "box_price", "box_currency", "box_available"})
+	writer.Write([]string{"site", "origin", "name", "url", "single_price", "single_currency", "single_available", "box_price", "box_currency", "box_available"})
 	for _, cigar := range cigars {
-		writer.Write([]string{cigar.origin, cigar.name, cigar.url, strconv.FormatFloat(cigar.single.price, 'g', -1, 64), cigar.single.currency, strconv.FormatBool(cigar.single.available), strconv.FormatFloat(cigar.box.price, 'g', -1, 64), cigar.box.currency, strconv.FormatBool(cigar.box.available)})
+		writer.Write([]string{cigar.site, cigar.origin, cigar.name, cigar.url, strconv.FormatFloat(cigar.single.price, 'g', -1, 64), cigar.single.currency, strconv.FormatBool(cigar.single.available), strconv.FormatFloat(cigar.box.price, 'g', -1, 64), cigar.box.currency, strconv.FormatBool(cigar.box.available)})
 	}
 }
 
-func main() {
+func scrapeHacico() []Cigar {
 	c := colly.NewCollector(
 		colly.AllowedDomains("www.hacico.de"),
 		colly.CacheDir("./hacico_cache"),
 		colly.Async(),
 	)
 
-	c.Limit(&colly.LimitRule{DomainGlob: "*", Parallelism: 4})
+	c.Limit(&colly.LimitRule{DomainGlob: "*", Parallelism: 8})
 	cigars := make([]Cigar, 0, 200)
 
 	c.OnHTML(`a.sub2`, func(e *colly.HTMLElement) {
@@ -103,6 +104,7 @@ func main() {
 		log.Println("Scraping ", name)
 
 		cigar := Cigar{
+			site:   "hacico",
 			origin: origin,
 			name:   name,
 			url:    url,
@@ -121,9 +123,77 @@ func main() {
 		cigars = append(cigars, cigar)
 	})
 
-	// start scraping
 	c.Visit("https://www.hacico.de/en/Cigars/Nicaragua")
 	c.Wait()
 
+	return cigars
+}
+
+func scrapeBestCigars() []Cigar {
+	c := colly.NewCollector(
+		colly.AllowedDomains("bestcigars.bg"),
+		colly.CacheDir("./bestcigars_cache"),
+	)
+
+	cigars := make([]Cigar, 0, 200)
+
+	c.OnHTML(`.page-numbers > li > a.next`, func(e *colly.HTMLElement) {
+		c.Visit(e.Attr("href"))
+	})
+
+	c.OnHTML(`.products, .product-title > a`, func(e *colly.HTMLElement) {
+		c.Visit(e.Attr("href"))
+	})
+
+	c.OnRequest(func(r *colly.Request) {
+		log.Println("visiting", r.URL.String())
+	})
+
+	c.OnHTML(`.shop-container > .product`, func(e *colly.HTMLElement) {
+		origin := e.DOM.Find(".woocommerce-product-attributes-item--attribute_pa_origin > td > p > a").First().Text()
+		name := e.ChildText(".product-title.entry-title")
+		url := e.Request.URL.String()
+
+		log.Println("Scraping ", name)
+
+		cigar := Cigar{
+			site:   "bestcigars",
+			origin: origin,
+			name:   name,
+			url:    url,
+		}
+
+		priceSingleBox := strings.Split(strings.ReplaceAll(strings.TrimSpace(e.DOM.Find(".product-page-price").First().Text()), " лв.", ""), " –")
+		priceSingle, _ := strconv.ParseFloat(priceSingleBox[0], 64)
+
+		cigar.single = Availability{
+			available: true,
+			currency:  "BGN",
+			price:     priceSingle,
+		}
+
+		cigar.box = Availability{
+			available: false,
+			currency:  "BGN",
+			price:     0.0,
+		}
+
+		if len(priceSingleBox) > 1 {
+			priceBox, _ := strconv.ParseFloat(strings.TrimSpace(priceSingleBox[1]), 64)
+			cigar.box.available = true
+			cigar.box.price = priceBox
+		}
+
+		cigars = append(cigars, cigar)
+	})
+
+	c.Visit("https://bestcigars.bg/kategoriya/puri")
+
+	return cigars
+}
+func main() {
+	cigars := scrapeBestCigars()
+	cigars = append(cigars, scrapeHacico()...)
+	log.Println(cigars)
 	saveToCSV(cigars)
 }
